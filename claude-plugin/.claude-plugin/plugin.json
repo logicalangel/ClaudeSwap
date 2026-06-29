@@ -1,0 +1,12 @@
+{
+  "name": "claude-switch",
+  "displayName": "Claude Switch",
+  "version": "0.3.0",
+  "description": "See your active Claude account and switch between accounts (personal, company) from chat.",
+  "author": {
+    "name": "LogicalAngel",
+    "url": "https://technello.com"
+  },
+  "homepage": "https://technello.com",
+  "keywords": ["account", "switch", "login", "auth"]
+}

@@ -1,0 +1,76 @@
+{
+  "name": "claude-switch",
+  "displayName": "Claude Switch",
+  "description": "See your active Claude Code account in the status bar and switch between accounts (personal, company) in one click.",
+  "version": "0.3.0",
+  "publisher": "LogicalAngel",
+  "author": "LogicalAngel (https://technello.com)",
+  "homepage": "https://technello.com",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/LogicalAngel/claude-switch.git"
+  },
+  "bugs": {
+    "url": "https://github.com/LogicalAngel/claude-switch/issues"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./extension.js",
+  "icon": "assets/icon.png",
+  "contributes": {
+    "icons": {
+      "claude": {
+        "description": "Claude logo",
+        "default": {
+          "fontPath": "assets/claude.woff",
+          "fontCharacter": "\\E900"
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "claudeAccounts.menu",
+        "title": "Claude: Account Menu"
+      },
+      {
+        "command": "claudeAccounts.switch",
+        "title": "Claude: Switch Account"
+      },
+      {
+        "command": "claudeAccounts.addAccount",
+        "title": "Claude: Add Account"
+      },
+      {
+        "command": "claudeAccounts.refresh",
+        "title": "Claude: Refresh Account Status"
+      },
+      {
+        "command": "claudeAccounts.deleteProfile",
+        "title": "Claude: Delete Saved Account Profile"
+      }
+    ],
+    "configuration": {
+      "title": "Claude Account Switcher",
+      "properties": {
+        "claudeAccounts.statusBar.show": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show the active Claude account in the status bar."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build:icon": "node build-font.js && rsvg-convert -w 256 -h 256 assets/logo.svg -o assets/icon.png",
+    "sync:plugin": "cp lib/credentials.js claude-plugin/lib/credentials.js"
+  },
+  "license": "MIT",
+  "type": "commonjs"
+}

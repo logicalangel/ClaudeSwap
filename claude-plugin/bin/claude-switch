@@ -1,0 +1,81 @@
+#!/usr/bin/env node
+// Claude Switch CLI. Shares the account engine with the VS Code extension, so
+// accounts saved in one show up in the other.
+const engine = require("../lib/credentials");
+
+function fmt(p, current) {
+  const mark = p.uuid === current ? "*" : " ";
+  const org = p.organizationName ? `  (${p.organizationName})` : "";
+  const tag = p.uuid === current ? "  [current]" : "";
+  return ` ${mark} ${p.email || p.uuid}${org}${tag}`;
+}
+
+async function main() {
+  const [cmd, arg] = process.argv.slice(2);
+
+  // Keep the store in sync with whatever is signed in right now.
+  let cur = null;
+  try {
+    const c = await engine.captureCurrent();
+    cur = c && c.uuid;
+  } catch {
+    /* not signed in */
+  }
+
+  if (!cmd || cmd === "list" || cmd === "ls") {
+    const list = engine.listAccounts();
+    const acct = engine.currentAccount();
+    console.log(`Active: ${acct ? acct.emailAddress : "not signed in"}`);
+    if (list.length === 0) {
+      console.log("No saved accounts yet. Sign into another account with 'claude auth login' and it will be saved.");
+      return;
+    }
+    console.log("Saved accounts:");
+    for (const p of list) console.log(fmt(p, cur));
+    const other = list.find((p) => p.uuid !== cur);
+    if (other) console.log(`\nSwitch with:  claude-switch use ${other.email || other.uuid}`);
+    return;
+  }
+
+  if (cmd === "current") {
+    const acct = engine.currentAccount();
+    console.log(acct ? acct.emailAddress : "not signed in");
+    return;
+  }
+
+  if (cmd === "use" || cmd === "switch") {
+    if (!arg) {
+      console.error("Usage: claude-switch use <email|account-id>");
+      process.exitCode = 1;
+      return;
+    }
+    const entry = engine.resolve(arg);
+    if (!entry) {
+      console.error(`No saved account matches "${arg}". Run 'claude-switch list' to see options.`);
+      process.exitCode = 1;
+      return;
+    }
+    const res = await engine.switchTo(entry.uuid);
+    if (!res.ok) {
+      console.error(res.error);
+      process.exitCode = 1;
+      return;
+    }
+    console.log(`Switched to ${res.acct ? res.acct.emailAddress : entry.email}.`);
+    console.log("Start a new 'claude' session for it to take effect.");
+    return;
+  }
+
+  if (cmd === "capture") {
+    const acct = engine.currentAccount();
+    console.log(acct ? `Saved ${acct.emailAddress}.` : "Nothing to save (not signed in).");
+    return;
+  }
+
+  console.log("Usage: claude-switch [list | current | use <email> | capture]");
+}
+
+main().catch((e) => {
+  console.error(e.message || String(e));
+  process.exitCode = 1;
+});
