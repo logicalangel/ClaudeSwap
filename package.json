@@ -1,6 +1,6 @@
 {
-  "name": "claude-switch",
-  "displayName": "Claude Switch",
+  "name": "claudeswap",
+  "displayName": "ClaudeSwap",
   "description": "See your active Claude Code account in the status bar and switch between accounts (personal, company) in one click.",
   "version": "0.3.0",
   "publisher": "LogicalAngel",
@@ -8,10 +8,10 @@
   "homepage": "https://technello.com",
   "repository": {
     "type": "git",
-    "url": "https://github.com/LogicalAngel/claude-switch.git"
+    "url": "https://github.com/LogicalAngel/claudeswap.git"
   },
   "bugs": {
-    "url": "https://github.com/LogicalAngel/claude-switch/issues"
+    "url": "https://github.com/LogicalAngel/claudeswap/issues"
   },
   "engines": {
     "vscode": "^1.85.0"

@@ -1,4 +1,4 @@
-# Claude Switch
+# ClaudeSwap
 
 See which Claude Code account you are signed into, and switch between accounts
 (for example personal and company). Works in two places that share the same saved
@@ -22,7 +22,7 @@ Click the account in the status bar. The menu lists your accounts; pick one to
 switch to it. The same menu has **Add account**, **Forget a saved account**, and
 **Refresh**.
 
-To install: open the Extensions view, search for **Claude Switch**, and click
+To install: open the Extensions view, search for **ClaudeSwap**, and click
 **Install**. Your active account appears in the status bar right away.
 
 ## In Claude Code chat
@@ -62,7 +62,7 @@ up in both places.
 Claude Code keeps account metadata in `~/.claude.json` (the `oauthAccount` field)
 and OAuth tokens in the OS credential store: the Keychain on macOS, or
 `~/.claude/.credentials.json` on Linux and Windows (it respects
-`CLAUDE_CONFIG_DIR`). Claude Switch saves a snapshot of each account it sees and
+`CLAUDE_CONFIG_DIR`). ClaudeSwap saves a snapshot of each account it sees and
 writes the chosen one back when you switch. It reads and writes only the same
 places Claude Code already uses. Set `CLAUDE_SWITCH_STORE=file` to keep snapshots
 in a protected file instead of the Keychain.
