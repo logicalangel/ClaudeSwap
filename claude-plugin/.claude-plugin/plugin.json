@@ -1,7 +1,7 @@
 {
   "name": "claude-switch",
   "displayName": "Claude Switch",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "See your active Claude account and switch between accounts (personal, company) from chat.",
   "author": {
     "name": "LogicalAngel",

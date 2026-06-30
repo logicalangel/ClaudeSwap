@@ -25,6 +25,25 @@ switch to it. The same menu has **Add account**, **Forget a saved account**, and
 To install: open the Extensions view, search for **ClaudeSwap**, and click
 **Install**. Your active account appears in the status bar right away.
 
+## Use a different account per project
+
+Open the status bar menu and choose **Use an account for this workspace**. Pick an
+account and ClaudeSwap binds it to this project. The choice is saved in the
+project's `.vscode/settings.json` (an email, not a secret):
+
+```json
+{ "claudeAccounts.account": "you@company.com" }
+```
+
+From then on, any `claude` you run in this project's integrated terminal uses that
+account, while your global login and other windows are untouched. So you can open
+two projects in two windows on two different accounts and run them at the same
+time. Open a new terminal after binding; existing terminals need a relaunch.
+
+It works by giving the project its own Claude config directory (credentials plus a
+copy of your settings) and pointing `CLAUDE_CONFIG_DIR` at it for this window's
+terminals. Unbind from the same menu.
+
 ## In Claude Code chat
 
 Run `/account` to see your accounts, or `/account you@company.com` to switch.

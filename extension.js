@@ -2,6 +2,9 @@ const vscode = require("vscode");
 const path = require("path");
 const engine = require("./lib/credentials");
 
+const ENV_VAR = "CLAUDE_CONFIG_DIR";
+
+let ctx;
 let statusItem;
 let pollTimer;
 
@@ -12,11 +15,19 @@ function describe(acct) {
   return org && org !== email ? `${email} (${org})` : email;
 }
 
+function hasWorkspace() {
+  return !!(vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length);
+}
+
+function pinnedAccount() {
+  return vscode.workspace.getConfiguration("claudeAccounts").get("account", "").trim();
+}
+
 async function refresh() {
   try {
     await engine.captureCurrent();
   } catch {
-    /* ignore capture errors (e.g. not signed in) */
+    /* not signed in */
   }
   updateStatusBar();
 }
@@ -27,16 +38,108 @@ function updateStatusBar() {
     statusItem.hide();
     return;
   }
-  const acct = engine.currentAccount();
-  const email = acct ? acct.emailAddress || "unknown" : "not logged in";
-  const others = engine.listAccounts().filter((p) => p.uuid !== engine.acctKey(acct)).length;
+
+  const global = engine.currentAccount();
+  const pin = pinnedAccount();
+
+  if (pin) {
+    const entry = engine.resolve(pin);
+    if (entry) {
+      statusItem.text = `$(claude) ${entry.email || pin} $(pinned)`;
+      statusItem.tooltip =
+        `This workspace uses ${entry.email || pin}.\n` +
+        `Claude runs as this account here, isolated from other windows.\n` +
+        (global ? `Global account: ${global.emailAddress}\n` : "") +
+        "Click to switch or manage";
+    } else {
+      statusItem.text = `$(claude) ${pin} $(warning)`;
+      statusItem.tooltip = `This workspace is pinned to ${pin}, but it is not saved yet.\nUse 'Add account' to sign into it once.`;
+    }
+    statusItem.show();
+    return;
+  }
+
+  const email = global ? global.emailAddress || "unknown" : "not logged in";
+  const others = engine.listAccounts().filter((p) => p.uuid !== engine.acctKey(global)).length;
   statusItem.text = `$(claude) ${email}${others ? " $(chevron-down)" : ""}`;
-  statusItem.tooltip = acct
-    ? `Claude account: ${describe(acct)}\n${others} other saved account(s)\nClick to switch or manage`
+  statusItem.tooltip = global
+    ? `Claude account: ${describe(global)}\n${others} other saved account(s)\nClick to switch or manage`
     : "No Claude account detected. Click to manage.";
   statusItem.show();
 }
 
+// ---- per-workspace account (isolated, parallel-safe) --------------------
+async function applyWorkspacePin() {
+  const col = ctx.environmentVariableCollection;
+  col.description = "ClaudeSwap: Claude account for this workspace";
+
+  const pin = pinnedAccount();
+  if (!pin) {
+    col.delete(ENV_VAR);
+    updateStatusBar();
+    return;
+  }
+  const entry = engine.resolve(pin);
+  if (!entry) {
+    col.delete(ENV_VAR);
+    vscode.window.showWarningMessage(
+      `This workspace is pinned to ${pin}, but that account is not saved yet. Use 'Add account' to sign into it once.`
+    );
+    updateStatusBar();
+    return;
+  }
+
+  try {
+    const dir = await engine.materializeEnvDir(entry.uuid);
+    col.replace(ENV_VAR, dir);
+  } catch (e) {
+    vscode.window.showErrorMessage(`Could not set up the workspace account: ${e.message}`);
+  }
+  updateStatusBar();
+}
+
+async function pinAccount() {
+  if (!hasWorkspace()) {
+    vscode.window.showWarningMessage("Open a folder or workspace before pinning an account to it.");
+    return;
+  }
+  const list = engine.listAccounts();
+  if (list.length === 0) {
+    vscode.window.showInformationMessage("No saved accounts yet. Use 'Add account' to sign into one first.");
+    return;
+  }
+  const chosen = await vscode.window.showQuickPick(
+    list.map((p) => ({
+      label: `$(claude) ${p.email || p.uuid}`,
+      description: p.organizationName || "",
+      id: p.email || p.uuid,
+    })),
+    { placeHolder: "Use which account for this workspace?" }
+  );
+  if (!chosen) return;
+
+  await vscode.workspace
+    .getConfiguration("claudeAccounts")
+    .update("account", chosen.id, vscode.ConfigurationTarget.Workspace);
+  await applyWorkspacePin();
+  vscode.window.showInformationMessage(
+    `This workspace will use ${chosen.id}. Open a new terminal to apply it; existing terminals need a relaunch.`
+  );
+}
+
+async function unpinAccount() {
+  if (!pinnedAccount()) {
+    vscode.window.showInformationMessage("This workspace is not pinned to an account.");
+    return;
+  }
+  await vscode.workspace
+    .getConfiguration("claudeAccounts")
+    .update("account", undefined, vscode.ConfigurationTarget.Workspace);
+  await applyWorkspacePin();
+  vscode.window.showInformationMessage("Unpinned. New terminals use your global account again.");
+}
+
+// ---- global account switch (whole machine) ------------------------------
 async function applySwitch(uuid) {
   const res = await engine.switchTo(uuid);
   if (!res.ok) {
@@ -60,7 +163,7 @@ async function chooseAndSwitch() {
   }
   const chosen = await vscode.window.showQuickPick(
     list.map((p) => ({ label: `$(claude) ${p.email || p.uuid}`, description: p.organizationName || "", uuid: p.uuid })),
-    { placeHolder: "Switch Claude Code to which account?" }
+    { placeHolder: "Switch the global Claude account to which one?" }
   );
   if (chosen) await applySwitch(chosen.uuid);
 }
@@ -71,7 +174,7 @@ async function addAccount() {
   term.show();
   term.sendText("claude auth login", true);
   vscode.window.showInformationMessage(
-    "Sign in with the other Claude account in the terminal. Claude Switch saves it automatically, then it appears under your accounts."
+    "Sign in with the other Claude account in the terminal. ClaudeSwap saves it automatically, then it appears in your accounts."
   );
 }
 
@@ -92,41 +195,54 @@ async function deleteProfile() {
 }
 
 async function showMenu() {
-  const acct = engine.currentAccount();
-  const curUuid = engine.acctKey(acct);
+  const global = engine.currentAccount();
+  const globalUuid = engine.acctKey(global);
   const list = engine.listAccounts();
+  const pin = pinnedAccount();
   const items = [];
 
-  // List accounts directly so a switch is one click.
   for (const p of list) {
-    const isCurrent = p.uuid === curUuid;
+    const isCurrent = p.uuid === globalUuid;
     items.push({
       label: `$(claude) ${p.email || p.displayName || p.uuid}`,
-      description: isCurrent ? "current" : p.organizationName || "",
+      description: isCurrent ? "current (global)" : p.organizationName || "",
       uuid: p.uuid,
       action: isCurrent ? "noop" : "switch",
     });
   }
-  if (acct && !list.some((p) => p.uuid === curUuid)) {
-    items.unshift({ label: `$(claude) ${acct.emailAddress}`, description: "current", action: "noop" });
+  if (global && !list.some((p) => p.uuid === globalUuid)) {
+    items.unshift({ label: `$(claude) ${global.emailAddress}`, description: "current (global)", action: "noop" });
   }
 
   if (items.length) items.push({ label: "", kind: vscode.QuickPickItemKind.Separator });
+
+  if (hasWorkspace()) {
+    if (pin) items.push({ label: `$(pinned) Unpin this workspace (uses ${pin})`, action: "unpin" });
+    else items.push({ label: "$(pin) Use an account for this workspace…", action: "pin" });
+  }
   items.push({ label: "$(add) Add account…", action: "add" });
   items.push({ label: "$(trash) Forget a saved account…", action: "delete" });
   items.push({ label: "$(refresh) Refresh now", action: "refresh" });
 
-  const pick = await vscode.window.showQuickPick(items, {
-    placeHolder: acct ? `Signed in as ${acct.emailAddress}. Pick an account to switch to.` : "No Claude account detected",
-  });
+  const placeHolder = pin
+    ? `Workspace uses ${pin}. Global: ${global ? global.emailAddress : "none"}.`
+    : global
+    ? `Signed in as ${global.emailAddress}. Pick an account to switch the global login.`
+    : "No Claude account detected";
+
+  const pick = await vscode.window.showQuickPick(items, { placeHolder });
   if (!pick) return;
   if (pick.action === "switch") return applySwitch(pick.uuid);
+  if (pick.action === "pin") return pinAccount();
+  if (pick.action === "unpin") return unpinAccount();
   if (pick.action === "add") return addAccount();
   if (pick.action === "delete") return deleteProfile();
   if (pick.action === "refresh") return refresh();
 }
 
 function activate(context) {
+  ctx = context;
+
   statusItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
   statusItem.command = "claudeAccounts.menu";
   context.subscriptions.push(statusItem);
@@ -137,8 +253,11 @@ function activate(context) {
     vscode.commands.registerCommand("claudeAccounts.addAccount", addAccount),
     vscode.commands.registerCommand("claudeAccounts.deleteProfile", deleteProfile),
     vscode.commands.registerCommand("claudeAccounts.refresh", refresh),
+    vscode.commands.registerCommand("claudeAccounts.pin", pinAccount),
+    vscode.commands.registerCommand("claudeAccounts.unpin", unpinAccount),
     vscode.workspace.onDidChangeConfiguration((e) => {
-      if (e.affectsConfiguration("claudeAccounts")) updateStatusBar();
+      if (e.affectsConfiguration("claudeAccounts.account")) applyWorkspacePin();
+      else if (e.affectsConfiguration("claudeAccounts")) updateStatusBar();
     }),
     vscode.window.onDidChangeWindowState((s) => {
       if (s.focused) refresh();
@@ -148,23 +267,20 @@ function activate(context) {
   // Sync with the CLI: react to the files Claude Code rewrites on sign-in/out.
   const debounced = debounce(refresh, 400);
   for (const f of [engine.paths.CLAUDE_JSON, engine.paths.CRED_FILE]) {
-    try {
-      const w = vscode.workspace.createFileSystemWatcher(
-        new vscode.RelativePattern(path.dirname(f), path.basename(f))
-      );
-      w.onDidChange(debounced);
-      w.onDidCreate(debounced);
-      w.onDidDelete(debounced);
-      context.subscriptions.push(w);
-    } catch {
-      /* ignore */
-    }
+    const w = vscode.workspace.createFileSystemWatcher(
+      new vscode.RelativePattern(path.dirname(f), path.basename(f))
+    );
+    w.onDidChange(debounced);
+    w.onDidCreate(debounced);
+    w.onDidDelete(debounced);
+    context.subscriptions.push(w);
   }
 
   pollTimer = setInterval(refresh, 20000); // backstop for macOS Keychain
   context.subscriptions.push({ dispose: () => clearInterval(pollTimer) });
 
-  refresh();
+  // Capture the current account, then apply this workspace's account binding.
+  refresh().then(applyWorkspacePin);
 }
 
 function debounce(fn, ms) {

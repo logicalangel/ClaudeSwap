@@ -1,13 +1,13 @@
 {
   "name": "logicalangel",
   "displayName": "LogicalAngel",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "plugins": [
     {
       "name": "claude-switch",
       "displayName": "Claude Switch",
       "description": "See your active Claude account and switch between accounts from chat.",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "source": {
         "source": "github",
         "repo": "LogicalAngel/claude-switch"

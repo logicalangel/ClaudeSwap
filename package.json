@@ -2,7 +2,7 @@
   "name": "claudeswap",
   "displayName": "ClaudeSwap",
   "description": "See your active Claude Code account in the status bar and switch between accounts (personal, company) in one click.",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "publisher": "LogicalAngel",
   "author": "LogicalAngel (https://technello.com)",
   "homepage": "https://technello.com",
@@ -54,6 +54,14 @@
       {
         "command": "claudeAccounts.deleteProfile",
         "title": "Claude: Delete Saved Account Profile"
+      },
+      {
+        "command": "claudeAccounts.pin",
+        "title": "Claude: Pin Current Account to This Workspace"
+      },
+      {
+        "command": "claudeAccounts.unpin",
+        "title": "Claude: Unpin Account from This Workspace"
       }
     ],
     "configuration": {
@@ -63,6 +71,12 @@
           "type": "boolean",
           "default": true,
           "description": "Show the active Claude account in the status bar."
+        },
+        "claudeAccounts.account": {
+          "type": "string",
+          "scope": "window",
+          "default": "",
+          "description": "Email or account id of the Claude account this workspace should use. When set, ClaudeSwap offers to switch to it when the workspace opens. Set this in workspace settings (.vscode/settings.json), usually via the 'Pin Current Account to This Workspace' command."
         }
       }
     }
