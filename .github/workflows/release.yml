@@ -1,0 +1,36 @@
+name: Release
+
+# Push a tag like v0.5.0 to build the .vsix, attach it to a GitHub release, and
+# publish to the VS Code Marketplace and Open VSX when their tokens are set.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      VSCE_PAT: ${{ secrets.VSCE_PAT }}
+      OVSX_PAT: ${{ secrets.OVSX_PAT }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npx vsce package -o claudeswap.vsix
+      - name: GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" claudeswap.vsix --generate-notes
+      - name: VS Code Marketplace
+        if: env.VSCE_PAT != ''
+        run: npx vsce publish --packagePath claudeswap.vsix
+      - name: Open VSX
+        if: env.OVSX_PAT != ''
+        run: npx --yes ovsx@0.10.1 publish claudeswap.vsix -p "$OVSX_PAT"

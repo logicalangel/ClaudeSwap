@@ -9,3 +9,9 @@ assets/glyph-claude.svg
 assets/logo.svg
 assets/icon@128.png
 marketing/**
+.github/**
+.claude-plugin/**
+test/**
+docs/**
+eslint.config.js
+.gitignore
