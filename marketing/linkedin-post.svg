@@ -40,7 +40,7 @@
   <text x="80" y="520" font-family="Inter" font-size="27" fill="#B8B4A8">No more <tspan font-family="JetBrains Mono" fill="#E8E4D8">claude auth logout</tspan> → log back in → repeat.</text>
 
   <!-- Mock VS Code window -->
-  <g transform="translate(80,580)" filter="url(#shadow)">
+  <g transform="translate(80,600)" filter="url(#shadow)">
     <rect width="1040" height="440" rx="18" fill="#232220" stroke="#34322D" stroke-width="2"/>
     <!-- title bar -->
     <path d="M18 0 H1022 A18 18 0 0 1 1040 18 V52 H0 V18 A18 18 0 0 1 18 0 Z" fill="#2B2A26"/>
@@ -84,11 +84,5 @@
     </g>
   </g>
 
-  <!-- Feature chips -->
-  <g font-family="Inter" font-weight="600" font-size="21" fill="#FAF9F5">
-    <g transform="translate(80,1064)"><rect width="300" height="54" rx="27" fill="#2B2A26" stroke="#3A3832" stroke-width="2"/><text x="150" y="35" text-anchor="middle">⚡ One-click switch</text></g>
-    <g transform="translate(400,1064)"><rect width="340" height="54" rx="27" fill="#2B2A26" stroke="#3A3832" stroke-width="2"/><text x="170" y="35" text-anchor="middle">📌 Account per project</text></g>
-    <g transform="translate(760,1064)"><rect width="360" height="54" rx="27" fill="#2B2A26" stroke="#3A3832" stroke-width="2"/><text x="180" y="35" text-anchor="middle">⇄ Two accounts in parallel</text></g>
-  </g>
-  <text x="600" y="1160" text-anchor="middle" font-family="Inter" font-size="19" fill="#8C887D">Free &amp; open source (MIT)  ·  macOS · Linux · Windows  ·  Search “ClaudeSwap” in Extensions</text>
+  <text x="600" y="1118" text-anchor="middle" font-family="Inter" font-size="19" fill="#8C887D">Free &amp; open source (MIT)  ·  Search “ClaudeSwap” in Extensions</text>
 </svg>
