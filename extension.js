@@ -15,6 +15,31 @@ function describe(acct) {
   return org && org !== email ? `${email} (${org})` : email;
 }
 
+function planName(entry) {
+  const plan = entry && entry.plan;
+  return plan ? plan.charAt(0).toUpperCase() + plan.slice(1) : "";
+}
+
+// "Max · Acme Inc" style detail for menus.
+function detail(entry) {
+  return [planName(entry), entry.organizationName !== entry.email && entry.organizationName]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+function entryFor(acct) {
+  const key = engine.acctKey(acct);
+  return key ? engine.listAccounts().find((p) => p.uuid === key) || null : null;
+}
+
+// Optional per-account status bar colour from claudeAccounts.accountColors,
+// keyed by email or alias.
+function colorFor(entry) {
+  if (!entry) return undefined;
+  const colors = vscode.workspace.getConfiguration("claudeAccounts").get("accountColors", {});
+  return colors[entry.email] || (entry.alias && colors[entry.alias]) || undefined;
+}
+
 function hasWorkspace() {
   return !!(vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length);
 }
@@ -23,13 +48,38 @@ function pinnedAccount() {
   return vscode.workspace.getConfiguration("claudeAccounts").get("account", "").trim();
 }
 
+// Window focus, file watchers and the poll can all fire at once; run one
+// capture at a time and coalesce the rest into a single follow-up.
+let refreshing = null;
+let refreshAgain = false;
+
 async function refresh() {
-  try {
-    await engine.captureCurrent();
-  } catch {
-    /* not signed in */
+  if (refreshing) {
+    refreshAgain = true;
+    return refreshing;
   }
-  updateStatusBar();
+  refreshing = (async () => {
+    do {
+      refreshAgain = false;
+      try {
+        await engine.captureCurrent();
+      } catch {
+        /* not signed in */
+      }
+    } while (refreshAgain);
+    updateStatusBar();
+  })();
+  try {
+    await refreshing;
+  } finally {
+    refreshing = null;
+  }
+}
+
+function openClaudeTerminal() {
+  const term = vscode.window.createTerminal({ name: "Claude" });
+  term.show();
+  term.sendText("claude", true);
 }
 
 function updateStatusBar() {
@@ -45,25 +95,30 @@ function updateStatusBar() {
   if (pin) {
     const entry = engine.resolve(pin);
     if (entry) {
-      statusItem.text = `$(claude) ${entry.email || pin} $(pinned)`;
+      statusItem.text = `$(claude) ${engine.label(entry)} $(pinned)`;
+      statusItem.color = colorFor(entry);
       statusItem.tooltip =
-        `This workspace uses ${entry.email || pin}.\n` +
+        `This workspace uses ${entry.email || pin}${planName(entry) ? ` (${planName(entry)})` : ""}.\n` +
         `Claude runs as this account here, isolated from other windows.\n` +
         (global ? `Global account: ${global.emailAddress}\n` : "") +
         "Click to switch or manage";
     } else {
       statusItem.text = `$(claude) ${pin} $(warning)`;
+      statusItem.color = undefined;
       statusItem.tooltip = `This workspace is pinned to ${pin}, but it is not saved yet.\nUse 'Add account' to sign into it once.`;
     }
     statusItem.show();
     return;
   }
 
-  const email = global ? global.emailAddress || "unknown" : "not logged in";
+  const entry = entryFor(global);
+  const name = entry ? engine.label(entry) : global ? global.emailAddress || "unknown" : "not logged in";
   const others = engine.listAccounts().filter((p) => p.uuid !== engine.acctKey(global)).length;
-  statusItem.text = `$(claude) ${email}${others ? " $(chevron-down)" : ""}`;
+  statusItem.text = `$(claude) ${name}${others ? " $(chevron-down)" : ""}`;
+  statusItem.color = colorFor(entry);
   statusItem.tooltip = global
-    ? `Claude account: ${describe(global)}\n${others} other saved account(s)\nClick to switch or manage`
+    ? `Claude account: ${describe(global)}${planName(entry) ? ` · ${planName(entry)} plan` : ""}\n` +
+      `${others} other saved account(s)\nClick to switch or manage`
     : "No Claude account detected. Click to manage.";
   statusItem.show();
 }
@@ -110,8 +165,8 @@ async function pinAccount() {
   }
   const chosen = await vscode.window.showQuickPick(
     list.map((p) => ({
-      label: `$(claude) ${p.email || p.uuid}`,
-      description: p.organizationName || "",
+      label: `$(claude) ${engine.label(p)}`,
+      description: [p.alias && p.email, detail(p)].filter(Boolean).join(" · "),
       id: p.email || p.uuid,
     })),
     { placeHolder: "Use which account for this workspace?" }
@@ -122,9 +177,11 @@ async function pinAccount() {
     .getConfiguration("claudeAccounts")
     .update("account", chosen.id, vscode.ConfigurationTarget.Workspace);
   await applyWorkspacePin();
-  vscode.window.showInformationMessage(
-    `This workspace will use ${chosen.id}. Open a new terminal to apply it; existing terminals need a relaunch.`
+  const open = await vscode.window.showInformationMessage(
+    `This workspace will use ${chosen.id}. Open a new terminal to apply it; existing terminals need a relaunch.`,
+    "Open Claude terminal"
   );
+  if (open) openClaudeTerminal();
 }
 
 async function unpinAccount() {
@@ -141,15 +198,23 @@ async function unpinAccount() {
 
 // ---- global account switch (whole machine) ------------------------------
 async function applySwitch(uuid) {
-  const res = await engine.switchTo(uuid);
+  let res;
+  try {
+    res = await engine.switchTo(uuid);
+  } catch (e) {
+    res = { ok: false, error: e.message };
+  }
   if (!res.ok) {
     vscode.window.showErrorMessage(res.error || "Switch failed.");
     return;
   }
   updateStatusBar();
-  vscode.window.showInformationMessage(
-    `Switched Claude Code to ${res.acct ? res.acct.emailAddress : uuid}. Restart any running 'claude' session to pick it up.`
+  const note = pinnedAccount() ? " This workspace is pinned, so its terminals keep the pinned account." : "";
+  const open = await vscode.window.showInformationMessage(
+    `Switched Claude Code to ${res.acct ? res.acct.emailAddress : uuid}. Running 'claude' sessions keep the old account until restarted.${note}`,
+    "Open Claude terminal"
   );
+  if (open) openClaudeTerminal();
 }
 
 async function chooseAndSwitch() {
@@ -162,7 +227,7 @@ async function chooseAndSwitch() {
     return;
   }
   const chosen = await vscode.window.showQuickPick(
-    list.map((p) => ({ label: `$(claude) ${p.email || p.uuid}`, description: p.organizationName || "", uuid: p.uuid })),
+    list.map((p) => ({ label: `$(claude) ${engine.label(p)}`, description: detail(p), uuid: p.uuid })),
     { placeHolder: "Switch the global Claude account to which one?" }
   );
   if (chosen) await applySwitch(chosen.uuid);
@@ -185,13 +250,33 @@ async function deleteProfile() {
     return;
   }
   const chosen = await vscode.window.showQuickPick(
-    list.map((p) => ({ label: p.email || p.uuid, description: p.organizationName || "", uuid: p.uuid })),
+    list.map((p) => ({ label: engine.label(p), description: detail(p), uuid: p.uuid })),
     { placeHolder: "Forget which saved account? (does not log you out)" }
   );
   if (!chosen) return;
   await engine.removeAccount(chosen.uuid);
   updateStatusBar();
   vscode.window.showInformationMessage(`Forgot account "${chosen.label}".`);
+}
+
+async function renameAccount() {
+  const list = engine.listAccounts();
+  if (list.length === 0) {
+    vscode.window.showInformationMessage("No saved accounts to rename.");
+    return;
+  }
+  const chosen = await vscode.window.showQuickPick(
+    list.map((p) => ({ label: engine.label(p), description: p.alias ? p.email : detail(p), entry: p })),
+    { placeHolder: "Rename which account?" }
+  );
+  if (!chosen) return;
+  const alias = await vscode.window.showInputBox({
+    prompt: `Name for ${chosen.entry.email || chosen.entry.uuid} (leave empty to show the email)`,
+    value: chosen.entry.alias || "",
+  });
+  if (alias === undefined) return;
+  engine.setAlias(chosen.entry.uuid, alias.trim());
+  updateStatusBar();
 }
 
 async function showMenu() {
@@ -204,8 +289,8 @@ async function showMenu() {
   for (const p of list) {
     const isCurrent = p.uuid === globalUuid;
     items.push({
-      label: `$(claude) ${p.email || p.displayName || p.uuid}`,
-      description: isCurrent ? "current (global)" : p.organizationName || "",
+      label: `$(claude) ${engine.label(p)}`,
+      description: [isCurrent && "current (global)", p.alias && p.email, detail(p)].filter(Boolean).join(" · "),
       uuid: p.uuid,
       action: isCurrent ? "noop" : "switch",
     });
@@ -221,6 +306,7 @@ async function showMenu() {
     else items.push({ label: "$(pin) Use an account for this workspace…", action: "pin" });
   }
   items.push({ label: "$(add) Add account…", action: "add" });
+  items.push({ label: "$(edit) Rename an account…", action: "rename" });
   items.push({ label: "$(trash) Forget a saved account…", action: "delete" });
   items.push({ label: "$(refresh) Refresh now", action: "refresh" });
 
@@ -236,6 +322,7 @@ async function showMenu() {
   if (pick.action === "pin") return pinAccount();
   if (pick.action === "unpin") return unpinAccount();
   if (pick.action === "add") return addAccount();
+  if (pick.action === "rename") return renameAccount();
   if (pick.action === "delete") return deleteProfile();
   if (pick.action === "refresh") return refresh();
 }
@@ -255,6 +342,7 @@ function activate(context) {
     vscode.commands.registerCommand("claudeAccounts.refresh", refresh),
     vscode.commands.registerCommand("claudeAccounts.pin", pinAccount),
     vscode.commands.registerCommand("claudeAccounts.unpin", unpinAccount),
+    vscode.commands.registerCommand("claudeAccounts.rename", renameAccount),
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration("claudeAccounts.account")) applyWorkspacePin();
       else if (e.affectsConfiguration("claudeAccounts")) updateStatusBar();

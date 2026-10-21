@@ -2,7 +2,7 @@
   "name": "claudeswap",
   "displayName": "ClaudeSwap",
   "description": "See your active Claude Code account in the status bar and switch between accounts (personal, company) in one click.",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "publisher": "LogicalAngel",
   "author": "LogicalAngel (https://technello.com)",
   "homepage": "https://technello.com",
@@ -62,6 +62,10 @@
       {
         "command": "claudeAccounts.unpin",
         "title": "Claude: Unpin Account from This Workspace"
+      },
+      {
+        "command": "claudeAccounts.rename",
+        "title": "Claude: Rename Saved Account"
       }
     ],
     "configuration": {
@@ -77,14 +81,35 @@
           "scope": "window",
           "default": "",
           "description": "Email or account id of the Claude account this workspace should use. When set, ClaudeSwap offers to switch to it when the workspace opens. Set this in workspace settings (.vscode/settings.json), usually via the 'Pin Current Account to This Workspace' command."
+        },
+        "claudeAccounts.accountColors": {
+          "type": "object",
+          "default": {},
+          "additionalProperties": {
+            "type": "string"
+          },
+          "markdownDescription": "Status bar text colour per account, keyed by email or alias. Values are CSS colours or theme colour ids, for example `{ \"you@company.com\": \"#4FC1FF\" }`."
         }
       }
     }
   },
   "scripts": {
     "build:icon": "node build-font.js && rsvg-convert -w 256 -h 256 assets/logo.svg -o assets/icon.png",
-    "sync:plugin": "cp lib/credentials.js claude-plugin/lib/credentials.js"
+    "sync:plugin": "cp lib/credentials.js claude-plugin/lib/credentials.js",
+    "check:sync": "node -e \"const f=require('fs');if(f.readFileSync('lib/credentials.js','utf8')!==f.readFileSync('claude-plugin/lib/credentials.js','utf8')){console.error('claude-plugin/lib/credentials.js is out of date; run npm run sync:plugin');process.exit(1)}\"",
+    "lint": "eslint .",
+    "test": "node --test",
+    "package": "vsce package"
   },
   "license": "MIT",
-  "type": "commonjs"
+  "type": "commonjs",
+  "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "@vscode/vsce": "^4.0.0",
+    "eslint": "^9.39.5",
+    "globals": "^17.13.0",
+    "svg2ttf": "^6.0.3",
+    "svgicons2svgfont": "^15.0.1",
+    "ttf2woff": "^3.0.0"
+  }
 }

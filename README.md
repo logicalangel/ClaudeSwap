@@ -18,9 +18,16 @@ store (the OS keychain on macOS, a protected file on Linux and Windows).
 
 ## In VS Code
 
-Click the account in the status bar. The menu lists your accounts; pick one to
-switch to it. The same menu has **Add account**, **Forget a saved account**, and
-**Refresh**.
+Click the account in the status bar. The menu lists your accounts with their plan
+(Pro, Max, Team, Enterprise); pick one to switch to it. The same menu has **Add
+account**, **Rename an account**, **Forget a saved account**, and **Refresh**.
+
+Give accounts short names like "Work" and "Personal" with **Rename an account**.
+To tell them apart at a glance, colour the status bar text per account:
+
+```json
+{ "claudeAccounts.accountColors": { "Work": "#4FC1FF", "Personal": "#D97757" } }
+```
 
 To install: open the Extensions view, search for **ClaudeSwap**, and click
 **Install**. Your active account appears in the status bar right away.
@@ -40,13 +47,24 @@ account, while your global login and other windows are untouched. So you can ope
 two projects in two windows on two different accounts and run them at the same
 time. Open a new terminal after binding; existing terminals need a relaunch.
 
-It works by giving the project its own Claude config directory (credentials plus a
-copy of your settings) and pointing `CLAUDE_CONFIG_DIR` at it for this window's
-terminals. Unbind from the same menu.
+It works by giving the project its own Claude config directory (its credentials,
+plus links to your `settings.json`, `CLAUDE.md`, commands, agents, skills and
+plugins, so later changes reach it too) and pointing `CLAUDE_CONFIG_DIR` at it for
+this window's terminals. Tokens Claude refreshes there are copied back to your
+saved accounts, so the global login and pinned projects never hand each other an
+expired token. Unbind from the same menu.
 
 ## In Claude Code chat
 
-Run `/account` to see your accounts, or `/account you@company.com` to switch.
+Install the plugin from this repository's marketplace:
+
+```
+/plugin marketplace add LogicalAngel/claudeswap
+/plugin install claude-switch@logicalangel
+```
+
+Run `/account` to see your accounts, or `/account you@company.com` (or a name such
+as `/account Work`) to switch.
 
 Show the active account in the status line by pointing your `settings.json` at the
 bundled script (use the absolute path where the plugin is installed):
@@ -65,7 +83,11 @@ You can also run the CLI directly:
 ```
 claude-switch list
 claude-switch use you@company.com
+claude-switch rename you@company.com Work
 ```
+
+The status line shows the account's name if you gave it one, and a 📌 in a pinned
+workspace.
 
 A switch in chat takes effect in a new `claude` session, because Claude Code keeps
 the current session's token in memory.
@@ -83,7 +105,9 @@ and OAuth tokens in the OS credential store: the Keychain on macOS, or
 `~/.claude/.credentials.json` on Linux and Windows (it respects
 `CLAUDE_CONFIG_DIR`). ClaudeSwap saves a snapshot of each account it sees and
 writes the chosen one back when you switch. It reads and writes only the same
-places Claude Code already uses. Set `CLAUDE_SWITCH_STORE=file` to keep snapshots
+places Claude Code already uses, and writes files atomically so a running `claude`
+never sees a half-written `~/.claude.json`. On Windows the saved-accounts file is
+restricted to your user with `icacls`. Set `CLAUDE_SWITCH_STORE=file` to keep snapshots
 in a protected file instead of the Keychain.
 
 This depends on how Claude Code currently stores things, so a future update could
@@ -93,10 +117,16 @@ change it.
 
 ```bash
 npm install
+npm test                # engine tests (never touch your real login)
+npm run lint
 npm run build:icon      # regenerate the icon font and logo (needs rsvg-convert)
-npm run sync:plugin     # copy the shared engine into the plugin
-vsce package            # build the VS Code extension (.vsix)
+npm run sync:plugin     # copy the shared engine into the plugin (CI checks this)
+npm run package         # build the VS Code extension (.vsix)
 ```
+
+Pushing a `v*` tag builds the `.vsix`, attaches it to a GitHub release, and
+publishes to the VS Code Marketplace and Open VSX when the `VSCE_PAT` and
+`OVSX_PAT` repository secrets are set.
 
 VS Code extension: open the folder and press F5 to run it in an Extension
 Development Host. Claude Code plugin: `claude --plugin-dir ./claude-plugin` to load

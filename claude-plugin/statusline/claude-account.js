@@ -10,12 +10,22 @@ const dir = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), ".claude");
 let file = path.join(dir, ".claude.json");
 if (!fs.existsSync(file)) file = path.join(os.homedir(), ".claude.json");
 
-let email = "not signed in";
+// A ClaudeSwap-pinned workspace runs from <store>/envs/<uuid>; the saved
+// accounts index sits two levels up.
+const envMatch = dir.match(/^(.*)[\\/]claude-switch[\\/]envs[\\/][^\\/]+[\\/]?$/);
+const indexFile = envMatch
+  ? path.join(envMatch[1], "claude-switch", "index.json")
+  : path.join(dir, "claude-switch", "index.json");
+
+let name = "not signed in";
 try {
   const acct = JSON.parse(fs.readFileSync(file, "utf8")).oauthAccount;
-  if (acct && acct.emailAddress) email = acct.emailAddress;
+  if (acct && acct.emailAddress) name = acct.emailAddress;
+  const key = acct && (acct.accountUuid || acct.emailAddress);
+  const entry = JSON.parse(fs.readFileSync(indexFile, "utf8")).find((p) => p.uuid === key);
+  if (entry && entry.alias) name = entry.alias;
 } catch {
-  /* leave default */
+  /* leave what we have */
 }
 
-process.stdout.write(`✻ ${email}`);
+process.stdout.write(`✻ ${name}${envMatch ? " 📌" : ""}`);

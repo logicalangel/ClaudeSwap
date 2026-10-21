@@ -5,9 +5,9 @@ const engine = require("../lib/credentials");
 
 function fmt(p, current) {
   const mark = p.uuid === current ? "*" : " ";
-  const org = p.organizationName ? `  (${p.organizationName})` : "";
+  const extra = [p.alias && p.email, p.plan, p.organizationName !== p.email && p.organizationName].filter(Boolean);
   const tag = p.uuid === current ? "  [current]" : "";
-  return ` ${mark} ${p.email || p.uuid}${org}${tag}`;
+  return ` ${mark} ${engine.label(p)}${extra.length ? `  (${extra.join(", ")})` : ""}${tag}`;
 }
 
 async function main() {
@@ -45,7 +45,7 @@ async function main() {
 
   if (cmd === "use" || cmd === "switch") {
     if (!arg) {
-      console.error("Usage: claude-switch use <email|account-id>");
+      console.error("Usage: claude-switch use <email|alias|account-id>");
       process.exitCode = 1;
       return;
     }
@@ -66,13 +66,26 @@ async function main() {
     return;
   }
 
+  if (cmd === "rename") {
+    const alias = process.argv.slice(4).join(" ").trim();
+    const entry = arg && engine.resolve(arg);
+    if (!entry) {
+      console.error("Usage: claude-switch rename <email|alias> [new name]  (no name clears it)");
+      process.exitCode = 1;
+      return;
+    }
+    engine.setAlias(entry.uuid, alias);
+    console.log(alias ? `${entry.email} is now shown as "${alias}".` : `Cleared the name for ${entry.email}.`);
+    return;
+  }
+
   if (cmd === "capture") {
     const acct = engine.currentAccount();
     console.log(acct ? `Saved ${acct.emailAddress}.` : "Nothing to save (not signed in).");
     return;
   }
 
-  console.log("Usage: claude-switch [list | current | use <email> | capture]");
+  console.log("Usage: claude-switch [list | current | use <email|alias> | rename <email|alias> [name] | capture]");
 }
 
 main().catch((e) => {

@@ -1,0 +1,16 @@
+{
+  "name": "logicalangel",
+  "owner": {
+    "name": "LogicalAngel",
+    "url": "https://technello.com"
+  },
+  "plugins": [
+    {
+      "name": "claude-switch",
+      "displayName": "Claude Switch",
+      "description": "See your active Claude account and switch between accounts from chat.",
+      "version": "0.5.0",
+      "source": "./claude-plugin"
+    }
+  ]
+}

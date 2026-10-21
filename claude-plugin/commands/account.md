@@ -1,7 +1,7 @@
 ---
 description: Show your Claude accounts and switch between them
 allowed-tools: Bash(claude-switch:*)
-argument-hint: [email or account to switch to]
+argument-hint: [email or name of the account to switch to]
 ---
 
 Help the user see and switch their Claude Code account using the `claude-switch` CLI.
