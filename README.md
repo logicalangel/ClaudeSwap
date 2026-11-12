@@ -1,14 +1,16 @@
 # ClaudeSwap
 
 See which Claude Code account you are signed into, and switch between accounts
-(for example personal and company). Works in two places that share the same saved
-accounts: the VS Code status bar, and Claude Code chat.
+(for example personal and company) and Anthropic API keys. Works in two places
+that share the same saved accounts and keys: the VS Code status bar, and Claude
+Code chat.
 
 ## What it does
 
 - Shows your active Claude account in the VS Code status bar and in the Claude
   Code status line.
 - Switches accounts in one click (VS Code) or one command (chat).
+- Switches to a saved API key the same way, and back to your account.
 - Remembers each account the first time you sign in, so there is no setup.
 - Updates on its own when you sign in or out from the CLI.
 - Works on macOS, Linux, and Windows.
@@ -19,8 +21,9 @@ store (the OS keychain on macOS, a protected file on Linux and Windows).
 ## In VS Code
 
 Click the account in the status bar. The menu lists your accounts with their plan
-(Pro, Max, Team, Enterprise); pick one to switch to it. The same menu has **Add
-account**, **Rename an account**, **Forget a saved account**, and **Refresh**.
+(Pro, Max, Team, Enterprise) and your saved API keys; pick one to switch to it.
+The same menu has **Add account**, **Add API key**, **Rename**, **Forget a saved
+account or key**, and **Refresh**.
 
 Give accounts short names like "Work" and "Personal" with **Rename an account**.
 To tell them apart at a glance, colour the status bar text per account:
@@ -32,15 +35,34 @@ To tell them apart at a glance, colour the status bar text per account:
 To install: open the Extensions view, search for **ClaudeSwap**, and click
 **Install**. Your active account appears in the status bar right away.
 
+## Use an API key
+
+Choose **Add API key** in the menu, give the key a name (for example "Work API")
+and paste it. Then pick it in the menu like an account. Claude Code uses the key
+from the next `claude` session on, and the status bar shows 🔑 and its name. Pick
+an account to go back; your claude.ai login was never removed.
+
+The key is kept in the macOS Keychain (on Linux and Windows, in a file only you
+can read under `~/.claude/claude-switch/keys`). To switch, ClaudeSwap sets
+Claude Code's `apiKeyHelper` setting to a one-line command that reads the key
+from there, so the key itself never goes into `settings.json`. If you already
+have your own `apiKeyHelper`, ClaudeSwap leaves it alone and says so.
+
+`ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` and the Bedrock, Vertex and Foundry
+settings outrank `apiKeyHelper` in Claude Code, so ClaudeSwap warns when one of
+them is set.
+
 ## Use a different account per project
 
-Open the status bar menu and choose **Use an account for this workspace**. Pick an
-account and ClaudeSwap binds it to this project. The choice is saved in the
+Open the status bar menu and choose **Use an account or key for this workspace**.
+Pick an account or API key and ClaudeSwap binds it to this project. The choice is saved in the
 project's `.vscode/settings.json` (an email, not a secret):
 
 ```json
 { "claudeAccounts.account": "you@company.com" }
 ```
+
+For an API key the value is the key's name.
 
 From then on, any `claude` you run in this project's integrated terminal uses that
 account, while your global login and other windows are untouched. So you can open
@@ -52,7 +74,9 @@ plus links to your `settings.json`, `CLAUDE.md`, commands, agents, skills and
 plugins, so later changes reach it too) and pointing `CLAUDE_CONFIG_DIR` at it for
 this window's terminals. Tokens Claude refreshes there are copied back to your
 saved accounts, so the global login and pinned projects never hand each other an
-expired token. Unbind from the same menu.
+expired token. While an API key is in use globally, a project pinned to an
+account gets a copy of your settings without the key, so it keeps its account.
+Unbind from the same menu.
 
 ## In Claude Code chat
 
@@ -63,8 +87,12 @@ Install the plugin from this repository's marketplace:
 /plugin install claude-switch@logicalangel
 ```
 
-Run `/account` to see your accounts, or `/account you@company.com` (or a name such
-as `/account Work`) to switch.
+Run `/account` to see your accounts and keys, or `/account you@company.com` (or a
+name such as `/account Work` or `/account "Work API"`) to switch.
+
+Never paste an API key into chat. To add one from chat, copy it and run
+`! pbpaste | claude-switch add-key "Work API"` (on Linux use `wl-paste` or
+`xclip -o`), or use **Add API key** in VS Code.
 
 Show the active account in the status line by pointing your `settings.json` at the
 bundled script (use the absolute path where the plugin is installed):
@@ -84,10 +112,13 @@ You can also run the CLI directly:
 claude-switch list
 claude-switch use you@company.com
 claude-switch rename you@company.com Work
+claude-switch add-key "Work API"      # type the key hidden, or pipe it in
+claude-switch use "Work API"
+claude-switch forget "Work API"
 ```
 
-The status line shows the account's name if you gave it one, and a 📌 in a pinned
-workspace.
+The status line shows the account's name if you gave it one, 🔑 and the key's
+name while an API key is in use, and a 📌 in a pinned workspace.
 
 A switch in chat takes effect in a new `claude` session, because Claude Code keeps
 the current session's token in memory.
@@ -100,15 +131,17 @@ up in both places.
 
 ## Under the hood
 
-Claude Code keeps account metadata in `~/.claude.json` (the `oauthAccount` field)
-and OAuth tokens in the OS credential store: the Keychain on macOS, or
-`~/.claude/.credentials.json` on Linux and Windows (it respects
-`CLAUDE_CONFIG_DIR`). ClaudeSwap saves a snapshot of each account it sees and
+Claude Code keeps account metadata in `~/.claude.json` (the `oauthAccount` field;
+`$CLAUDE_CONFIG_DIR/.claude.json` when that variable is set) and OAuth tokens in
+the OS credential store: the Keychain on macOS, or `~/.claude/.credentials.json`
+on Linux and Windows (it respects `CLAUDE_CONFIG_DIR`). A Console login also
+keeps an API key there, which ClaudeSwap saves with the account. ClaudeSwap saves a snapshot of each account it sees and
 writes the chosen one back when you switch. It reads and writes only the same
 places Claude Code already uses, and writes files atomically so a running `claude`
 never sees a half-written `~/.claude.json`. On Windows the saved-accounts file is
-restricted to your user with `icacls`. Set `CLAUDE_SWITCH_STORE=file` to keep snapshots
-in a protected file instead of the Keychain.
+restricted to your user with `icacls`. Keychain writes go through `security -i`,
+so secrets do not show in the process list. Set `CLAUDE_SWITCH_STORE=file` to
+keep snapshots and API keys in protected files instead of the Keychain.
 
 This depends on how Claude Code currently stores things, so a future update could
 change it.
