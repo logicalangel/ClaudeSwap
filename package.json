@@ -1,8 +1,8 @@
 {
   "name": "claudeswap",
   "displayName": "ClaudeSwap",
-  "description": "See your active Claude Code account in the status bar and switch between accounts (personal, company) in one click.",
-  "version": "0.5.0",
+  "description": "See your active Claude Code account in the status bar and switch between accounts (personal, company) and saved API keys in one click.",
+  "version": "0.6.0",
   "publisher": "LogicalAngel",
   "author": "LogicalAngel (https://technello.com)",
   "homepage": "https://technello.com",
@@ -48,16 +48,20 @@
         "title": "Claude: Add Account"
       },
       {
+        "command": "claudeAccounts.addApiKey",
+        "title": "Claude: Add API Key"
+      },
+      {
         "command": "claudeAccounts.refresh",
         "title": "Claude: Refresh Account Status"
       },
       {
         "command": "claudeAccounts.deleteProfile",
-        "title": "Claude: Delete Saved Account Profile"
+        "title": "Claude: Forget Saved Account or API Key"
       },
       {
         "command": "claudeAccounts.pin",
-        "title": "Claude: Pin Current Account to This Workspace"
+        "title": "Claude: Use an Account or API Key for This Workspace"
       },
       {
         "command": "claudeAccounts.unpin",
@@ -65,7 +69,7 @@
       },
       {
         "command": "claudeAccounts.rename",
-        "title": "Claude: Rename Saved Account"
+        "title": "Claude: Rename Saved Account or API Key"
       }
     ],
     "configuration": {
@@ -80,7 +84,7 @@
           "type": "string",
           "scope": "window",
           "default": "",
-          "description": "Email or account id of the Claude account this workspace should use. When set, ClaudeSwap offers to switch to it when the workspace opens. Set this in workspace settings (.vscode/settings.json), usually via the 'Pin Current Account to This Workspace' command."
+          "description": "Email, name or account id of the Claude account, or name of the saved API key, this workspace should use. Claude in this window's terminals then runs with it, isolated from other windows. Set this in workspace settings (.vscode/settings.json), usually via the 'Use an Account or API Key for This Workspace' command."
         },
         "claudeAccounts.accountColors": {
           "type": "object",
@@ -88,7 +92,7 @@
           "additionalProperties": {
             "type": "string"
           },
-          "markdownDescription": "Status bar text colour per account, keyed by email or alias. Values are CSS colours or theme colour ids, for example `{ \"you@company.com\": \"#4FC1FF\" }`."
+          "markdownDescription": "Status bar text colour per account or API key, keyed by email, alias or key name. Values are CSS colours or theme colour ids, for example `{ \"you@company.com\": \"#4FC1FF\" }`."
         }
       }
     }

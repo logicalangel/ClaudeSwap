@@ -1,13 +1,71 @@
 #!/usr/bin/env node
 // Claude Switch CLI. Shares the account engine with the VS Code extension, so
-// accounts saved in one show up in the other.
+// accounts and API keys saved in one show up in the other.
 const engine = require("../lib/credentials");
+
+const USAGE = `Usage: claude-switch <command>
+  list                          accounts and API keys (default)
+  current                       what Claude Code uses now
+  use <email|name>              switch to an account or a saved API key
+  add-key <name>                save an API key (typed hidden, or piped in)
+  rename <email|name> [name]    name an account or rename a key (no name clears an account's)
+  forget <email|name>           forget a saved account or API key
+  capture                       save the account signed in now`;
 
 function fmt(p, current) {
   const mark = p.uuid === current ? "*" : " ";
   const extra = [p.alias && p.email, p.plan, p.organizationName !== p.email && p.organizationName].filter(Boolean);
   const tag = p.uuid === current ? "  [current]" : "";
   return ` ${mark} ${engine.label(p)}${extra.length ? `  (${extra.join(", ")})` : ""}${tag}`;
+}
+
+function fmtKey(k, activeId) {
+  const on = k.id === activeId;
+  return ` ${on ? "*" : " "} ${k.name}  (API key …${k.hint})${on ? "  [current]" : ""}`;
+}
+
+function warnOverrides(list) {
+  if (list.length) {
+    console.log(`Note: ${list.join(", ")} is set, and Claude Code puts that ahead of saved keys and accounts.`);
+  }
+}
+
+// Read a secret without echoing it: hidden typing on a terminal, else stdin
+// (so `pbpaste | claude-switch add-key Work` works and nothing is printed).
+function readSecret(prompt) {
+  const stdin = process.stdin;
+  if (!stdin.isTTY) {
+    return new Promise((resolve, reject) => {
+      let data = "";
+      stdin.setEncoding("utf8");
+      stdin.on("data", (c) => (data += c));
+      stdin.on("end", () => resolve(data.trim()));
+      stdin.on("error", reject);
+    });
+  }
+  return new Promise((resolve) => {
+    process.stderr.write(prompt);
+    let data = "";
+    stdin.setRawMode(true);
+    stdin.resume();
+    stdin.setEncoding("utf8");
+    const done = (value) => {
+      stdin.setRawMode(false);
+      stdin.pause();
+      stdin.removeListener("data", onData);
+      process.stderr.write("\n");
+      resolve(value);
+    };
+    const onData = (chunk) => {
+      for (const ch of chunk) {
+        if (ch === "\r" || ch === "\n") return done(data.trim());
+        if (ch === "\u0003") return done(null); // Ctrl-C
+        if (ch === "\u007f" || ch === "\b") data = data.slice(0, -1);
+        else data += ch;
+      }
+    };
+    stdin.on("data", onData);
+  });
 }
 
 async function main() {
@@ -24,38 +82,73 @@ async function main() {
 
   if (!cmd || cmd === "list" || cmd === "ls") {
     const list = engine.listAccounts();
+    const keys = engine.listApiKeys();
     const acct = engine.currentAccount();
-    console.log(`Active: ${acct ? acct.emailAddress : "not signed in"}`);
-    if (list.length === 0) {
+    const active = engine.activeApiKey();
+    console.log(
+      active
+        ? `Active: API key ${active.name}${acct ? ` (claude.ai login ${acct.emailAddress} kept underneath)` : ""}`
+        : `Active: ${acct ? acct.emailAddress : "not signed in"}`
+    );
+    if (engine.pinnedEnvId) console.log("This workspace is pinned by ClaudeSwap; a switch here changes the global account.");
+    if (list.length === 0 && keys.length === 0) {
       console.log("No saved accounts yet. Sign into another account with 'claude auth login' and it will be saved.");
       return;
     }
-    console.log("Saved accounts:");
-    for (const p of list) console.log(fmt(p, cur));
-    const other = list.find((p) => p.uuid !== cur);
-    if (other) console.log(`\nSwitch with:  claude-switch use ${other.email || other.uuid}`);
+    if (list.length) {
+      console.log("Saved accounts:");
+      for (const p of list) console.log(fmt(p, active ? null : cur));
+    }
+    if (keys.length) {
+      console.log("Saved API keys:");
+      for (const k of keys) console.log(fmtKey(k, active && active.id));
+    }
+    const other = list.find((p) => active || p.uuid !== cur) || keys.find((k) => !active || k.id !== active.id);
+    if (other) console.log(`\nSwitch with:  claude-switch use ${other.email || other.name || other.uuid}`);
+    warnOverrides(engine.authOverrides());
     return;
   }
 
   if (cmd === "current") {
+    const active = engine.activeApiKey();
     const acct = engine.currentAccount();
-    console.log(acct ? acct.emailAddress : "not signed in");
+    console.log(active ? `API key ${active.name}` : acct ? acct.emailAddress : "not signed in");
     return;
   }
 
   if (cmd === "use" || cmd === "switch") {
     if (!arg) {
-      console.error("Usage: claude-switch use <email|alias|account-id>");
+      console.error("Usage: claude-switch use <email|name|account-id>");
       process.exitCode = 1;
       return;
     }
-    const entry = engine.resolve(arg);
-    if (!entry) {
-      console.error(`No saved account matches "${arg}". Run 'claude-switch list' to see options.`);
+    const target = engine.resolveAny(arg);
+    if (!target) {
+      console.error(`No saved account or API key matches "${arg}". Run 'claude-switch list' to see options.`);
       process.exitCode = 1;
       return;
     }
-    const res = await engine.switchTo(entry.uuid);
+    if (target.kind === "apiKey") {
+      const res = await engine.useApiKey(target.key.id);
+      if (!res.ok) {
+        console.error(res.error);
+        process.exitCode = 1;
+        return;
+      }
+      console.log(`Switched to the API key ${res.key.name} (…${res.key.hint}).`);
+      console.log("Start a new 'claude' session for it to take effect.");
+      warnOverrides(res.overrides);
+      return;
+    }
+    const entry = target.account;
+    const active = engine.activeApiKey();
+    let res;
+    if (active && entry.uuid === cur) {
+      await engine.clearApiKey();
+      res = { ok: true, acct: engine.currentAccount() };
+    } else {
+      res = await engine.switchTo(entry.uuid);
+    }
     if (!res.ok) {
       console.error(res.error);
       process.exitCode = 1;
@@ -63,19 +156,61 @@ async function main() {
     }
     console.log(`Switched to ${res.acct ? res.acct.emailAddress : entry.email}.`);
     console.log("Start a new 'claude' session for it to take effect.");
+    warnOverrides(engine.authOverrides());
+    return;
+  }
+
+  if (cmd === "add-key") {
+    const name = process.argv.slice(3).join(" ").trim();
+    if (!name) {
+      console.error("Usage: claude-switch add-key <name>   (then type or pipe the key; never pass it as an argument)");
+      process.exitCode = 1;
+      return;
+    }
+    const key = await readSecret(`API key for ${name}: `);
+    if (!key) {
+      console.error("No key given; nothing saved.");
+      process.exitCode = 1;
+      return;
+    }
+    const entry = await engine.addApiKey(name, key);
+    console.log(`Saved the API key ${entry.name} (…${entry.hint}). Use it with:  claude-switch use "${entry.name}"`);
     return;
   }
 
   if (cmd === "rename") {
-    const alias = process.argv.slice(4).join(" ").trim();
-    const entry = arg && engine.resolve(arg);
-    if (!entry) {
-      console.error("Usage: claude-switch rename <email|alias> [new name]  (no name clears it)");
+    const name = process.argv.slice(4).join(" ").trim();
+    const target = arg && engine.resolveAny(arg);
+    if (!target) {
+      console.error("Usage: claude-switch rename <email|name> [new name]  (no name clears an account's name)");
       process.exitCode = 1;
       return;
     }
-    engine.setAlias(entry.uuid, alias);
-    console.log(alias ? `${entry.email} is now shown as "${alias}".` : `Cleared the name for ${entry.email}.`);
+    if (target.kind === "apiKey") {
+      engine.renameApiKey(target.key.id, name);
+      console.log(`The API key ${target.key.name} is now called "${name}".`);
+      return;
+    }
+    const entry = target.account;
+    engine.setAlias(entry.uuid, name);
+    console.log(name ? `${entry.email} is now shown as "${name}".` : `Cleared the name for ${entry.email}.`);
+    return;
+  }
+
+  if (cmd === "forget" || cmd === "remove") {
+    const target = arg && engine.resolveAny(arg);
+    if (!target) {
+      console.error("Usage: claude-switch forget <email|name>");
+      process.exitCode = 1;
+      return;
+    }
+    if (target.kind === "apiKey") {
+      await engine.removeApiKey(target.key.id);
+      console.log(`Forgot the API key ${target.key.name}.`);
+    } else {
+      await engine.removeAccount(target.account.uuid);
+      console.log(`Forgot ${engine.label(target.account)} (you stay signed in if it is the current account).`);
+    }
     return;
   }
 
@@ -85,7 +220,7 @@ async function main() {
     return;
   }
 
-  console.log("Usage: claude-switch [list | current | use <email|alias> | rename <email|alias> [name] | capture]");
+  console.log(USAGE);
 }
 
 main().catch((e) => {

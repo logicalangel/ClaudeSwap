@@ -8,8 +8,8 @@
     {
       "name": "claude-switch",
       "displayName": "Claude Switch",
-      "description": "See your active Claude account and switch between accounts from chat.",
-      "version": "0.5.0",
+      "description": "See your active Claude account or API key and switch between them from chat.",
+      "version": "0.6.0",
       "source": "./claude-plugin"
     }
   ]
