@@ -2,7 +2,7 @@
   "name": "claudeswap",
   "displayName": "ClaudeSwap",
   "description": "See your active Claude Code account in the status bar and switch between accounts (personal, company) and saved API keys in one click.",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "publisher": "LogicalAngel",
   "author": "LogicalAngel (https://technello.com)",
   "homepage": "https://technello.com",
@@ -20,7 +20,7 @@
     "Other"
   ],
   "activationEvents": [
-    "onStartupFinished"
+    "*"
   ],
   "main": "./extension.js",
   "icon": "assets/icon.png",
@@ -61,11 +61,15 @@
       },
       {
         "command": "claudeAccounts.pin",
-        "title": "Claude: Use an Account or API Key for This Workspace"
+        "title": "Claude: Pin an Account or API Key to This Workspace"
       },
       {
         "command": "claudeAccounts.unpin",
         "title": "Claude: Unpin Account from This Workspace"
+      },
+      {
+        "command": "claudeAccounts.setupStatusLine",
+        "title": "Claude: Show Account in Claude Code Status Line"
       },
       {
         "command": "claudeAccounts.rename",
@@ -84,7 +88,7 @@
           "type": "string",
           "scope": "window",
           "default": "",
-          "description": "Email, name or account id of the Claude account, or name of the saved API key, this workspace should use. Claude in this window's terminals then runs with it, isolated from other windows. Set this in workspace settings (.vscode/settings.json), usually via the 'Use an Account or API Key for This Workspace' command."
+          "description": "Email, name or account id of the Claude account, or name of the saved API key, this workspace should use. Claude then runs with it in this window only (the Claude Code panel and the terminals); if it cannot be set up, Claude stays signed out here instead of using another account. Set this in workspace settings (.vscode/settings.json), usually via the 'Pin an Account or API Key to This Workspace' command."
         },
         "claudeAccounts.accountColors": {
           "type": "object",

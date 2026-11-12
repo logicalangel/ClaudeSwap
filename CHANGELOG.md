@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.6.1
+
+### Pinned workspaces
+- A pin now covers the Claude Code panel too, not only the terminals: the panel
+  starts Claude with the window's pinned account. ClaudeSwap starts with VS Code,
+  so a panel session restored with the window already uses the pin.
+- A pinned workspace never falls back to another account. If the pinned account
+  or key is missing or cannot be set up, Claude stays signed out there and the
+  status bar shows the pin in red.
+- **Add account** from a pinned window signs in globally. Before, it signed in
+  inside the pinned workspace's folder, and the other account's token could end
+  up saved under the pinned account. Such a sign-in is now also ignored when
+  saving tokens, and the pinned account is put back when the workspace is set up.
+- After pinning or unpinning, a **Reload window** button switches Claude
+  sessions that are already open.
+
+### Switching
+- After a switch, **Reload window** lets the Claude panel continue the same
+  conversation with the new account, and **Continue in terminal** runs
+  `claude --continue`.
+- **Add account** says that the new sign-in becomes the active account, and
+  ClaudeSwap tells you when it has saved a new account and offers to name it.
+
+### API keys
+- A new key is checked with the Anthropic API (one free request that lists
+  models; ANTHROPIC_BASE_URL is respected). A key the API rejects is not saved;
+  if the check cannot run, the key is saved and you are told.
+
+### Menu and status line
+- Rename, Forget and Refresh moved into **Manage…**, so the menu starts with
+  your accounts and keys.
+- **Show the account in Claude Code's status line** sets up the status line
+  from VS Code, and keeps a status line of your own unless you choose to
+  replace it.
+
 ## 0.6.0
 
 ### Added

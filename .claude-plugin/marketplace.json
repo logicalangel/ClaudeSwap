@@ -9,7 +9,7 @@
       "name": "claude-switch",
       "displayName": "Claude Switch",
       "description": "See your active Claude account or API key and switch between them from chat.",
-      "version": "0.6.0",
+      "version": "0.6.1",
       "source": "./claude-plugin"
     }
   ]

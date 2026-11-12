@@ -1,7 +1,7 @@
 {
   "name": "claude-switch",
   "displayName": "Claude Switch",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "See your active Claude account or API key and switch between accounts (personal, company) and saved API keys from chat.",
   "author": {
     "name": "LogicalAngel",

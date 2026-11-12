@@ -5,6 +5,7 @@ node_modules/**
 build-font.js
 package-lock.json
 claude-plugin/**
+!claude-plugin/statusline/claude-account.js
 assets/glyph-claude.svg
 assets/logo.svg
 assets/icon@128.png
