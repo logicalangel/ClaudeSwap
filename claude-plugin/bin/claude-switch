@@ -174,7 +174,10 @@ async function main() {
       return;
     }
     const entry = await engine.addApiKey(name, key);
-    console.log(`Saved the API key ${entry.name} (…${entry.hint}). Use it with:  claude-switch use "${entry.name}"`);
+    const checked =
+      entry.check === "ok" ? "Anthropic accepted it." : `It could not be checked (${entry.checkNote}); saved anyway.`;
+    console.log(`Saved the API key ${entry.name} (…${entry.hint}). ${checked}`);
+    console.log(`Use it with:  claude-switch use "${entry.name}"`);
     return;
   }
 

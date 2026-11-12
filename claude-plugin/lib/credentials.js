@@ -32,6 +32,10 @@ const KEYS_DIR = path.join(STORE_DIR, "keys"); // API key secrets off the keycha
 const SECRETS_FILE = path.join(STORE_DIR, "secrets.json"); // non-macOS snapshot store
 const ENVS_DIR = path.join(STORE_DIR, "envs");
 const KEY_ENV_PREFIX = "key-";
+// Used when a workspace's pinned account cannot be set up: no login at all, so
+// Claude asks to sign in instead of quietly running as the global account.
+const UNAVAILABLE_ENV = "_unavailable";
+const STATUSLINE_FILE = path.join(STORE_DIR, "statusline.js");
 
 // Entries of the global config dir that per-workspace env dirs share by link,
 // so later changes to settings, commands, agents or plugins reach them too.
@@ -484,17 +488,56 @@ function nameTaken(name, except) {
   );
 }
 
-async function addApiKey(name, key) {
+function settingsEnv() {
+  try {
+    return readSettings(SETTINGS_FILE).json.env || {};
+  } catch {
+    return {};
+  }
+}
+
+// Ask the API whether it accepts the key, with one request that costs nothing
+// (listing models). Goes to ANTHROPIC_BASE_URL when set, like Claude Code.
+// "rejected" only for a 401; anything else that is not a success is reported
+// as unverified, so an unusual gateway or a network hiccup never blocks saving.
+async function verifyApiKey(key) {
+  const base = (process.env.ANTHROPIC_BASE_URL || settingsEnv().ANTHROPIC_BASE_URL || "https://api.anthropic.com").replace(
+    /\/+$/,
+    ""
+  );
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 10000);
+  try {
+    const res = await fetch(`${base}/v1/models?limit=1`, {
+      headers: { "x-api-key": key, "anthropic-version": "2023-06-01" },
+      signal: ctrl.signal,
+    });
+    if (res.ok) return { status: "ok" };
+    if (res.status === 401) return { status: "rejected" };
+    return { status: "unverified", reason: `the API answered ${res.status}` };
+  } catch (e) {
+    return { status: "unverified", reason: e.name === "AbortError" ? "no answer within 10 seconds" : "could not reach the API" };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Returns the saved entry plus `check` ("ok" or "unverified") and `checkNote`.
+async function addApiKey(name, key, { verify = true } = {}) {
   const n = String(name || "").trim();
   if (!n) throw new Error("Give the API key a name, for example Work.");
   if (nameTaken(n)) throw new Error(`An account or API key is already called "${n}".`);
   const k = checkApiKey(key);
+  const check = verify ? await verifyApiKey(k) : { status: "unverified", reason: "not checked" };
+  if (check.status === "rejected") {
+    throw new Error("Anthropic rejected this key (it is wrong, revoked or expired). Nothing was saved.");
+  }
   const id = crypto.randomBytes(6).toString("hex");
   if (storeUsesKeychain) await keychainWrite(KEY_SERVICE, id, k);
   else writeFileAtomic(keyFile(id), k, 0o600);
   const entry = { id, name: n, hint: k.slice(-4), addedAt: new Date().toISOString() };
   setApiKeys([...listApiKeys(), entry]);
-  return entry;
+  return { ...entry, check: check.status, checkNote: check.reason || null };
 }
 
 async function getApiKey(id) {
@@ -588,12 +631,7 @@ function activeApiKey() {
 // Code's order: cloud providers, ANTHROPIC_AUTH_TOKEN, ANTHROPIC_API_KEY. Set
 // in this process's environment or in settings.json "env".
 function authOverrides() {
-  let settingsEnv = {};
-  try {
-    settingsEnv = readSettings(SETTINGS_FILE).json.env || {};
-  } catch {
-    /* unreadable settings */
-  }
+  const fromSettings = settingsEnv();
   return [
     "CLAUDE_CODE_USE_BEDROCK",
     "CLAUDE_CODE_USE_VERTEX",
@@ -601,7 +639,7 @@ function authOverrides() {
     "ANTHROPIC_AUTH_TOKEN",
     "ANTHROPIC_API_KEY",
   ].filter((name) => {
-    const v = process.env[name] || settingsEnv[name];
+    const v = process.env[name] || fromSettings[name];
     return v && v !== "0" && v !== "false";
   });
 }
@@ -638,6 +676,46 @@ async function clearApiKey() {
   writeSettings(SETTINGS_FILE, s);
   await syncEnvDirs();
   return true;
+}
+
+// ---- status line --------------------------------------------------------
+// The status line script is copied to a fixed place in the store, so the
+// command in settings.json survives extension updates (whose folder changes).
+function isOurStatusLine(statusLine) {
+  return !!(statusLine && typeof statusLine.command === "string" && statusLine.command.includes(STATUSLINE_FILE));
+}
+
+function statusLineState() {
+  let json;
+  try {
+    json = readSettings(SETTINGS_FILE).json;
+  } catch {
+    return "unreadable";
+  }
+  if (!json.statusLine) return "none";
+  return isOurStatusLine(json.statusLine) ? "ours" : "other";
+}
+
+function copyStatusLineScript(source) {
+  const data = fs.readFileSync(source, "utf8");
+  if (readFileOrNull(STATUSLINE_FILE) !== data) writeFileAtomic(STATUSLINE_FILE, data, 0o644);
+}
+
+// Point Claude Code's status line at the script. Replaces a status line the
+// user set up themselves only with replace: true.
+async function installStatusLine(source, nodePath, { replace = false } = {}) {
+  const s = readSettings(SETTINGS_FILE);
+  if (s.json.statusLine && !isOurStatusLine(s.json.statusLine) && !replace) return { ok: false, existing: true };
+  copyStatusLineScript(source);
+  s.json.statusLine = { type: "command", command: `${shellQuote(nodePath)} ${shellQuote(STATUSLINE_FILE)}` };
+  writeSettings(SETTINGS_FILE, s);
+  await syncEnvDirs();
+  return { ok: true };
+}
+
+// Keep the copied script current after an update, if it is in use.
+function refreshStatusLineScript(source) {
+  if (fs.existsSync(STATUSLINE_FILE)) copyStatusLineScript(source);
 }
 
 // ---- per-account env dirs -----------------------------------------------
@@ -751,6 +829,10 @@ async function syncEnvDirs() {
       continue;
     }
     ensureEnvSettings(dir, null);
+    if (name === UNAVAILABLE_ENV) continue;
+    // Someone signed into another account inside this pinned dir: never save
+    // that token under the pinned account.
+    if (!envBelongsTo(dir, name)) continue;
     const envCreds = await readEnvCreds(dir);
     if (!envCreds) continue;
     const blob = await getSecret(name);
@@ -909,8 +991,9 @@ async function materializeEnvDir(uuid) {
   const dir = envDir(uuid);
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
 
-  // Never overwrite a token Claude refreshed here with an older saved one.
-  const existing = await readEnvCreds(dir);
+  // Never overwrite a token Claude refreshed here with an older saved one,
+  // but drop a token from another account signed in here by mistake.
+  const existing = envBelongsTo(dir, uuid) ? await readEnvCreds(dir) : null;
   const best = newest(blob.credentials, existing);
   if (best !== blob.credentials) await setSecret(uuid, { ...blob, credentials: best });
   await writeEnvCreds(dir, best, blob.acctAttr);
@@ -939,6 +1022,34 @@ async function materializeKeyEnvDir(id) {
   return dir;
 }
 
+// Whether the login Claude Code holds in an env dir is the account the dir is
+// for. Claude Code writes oauthAccount there on sign-in; no record counts as yes.
+function envBelongsTo(dir, uuid) {
+  try {
+    const meta = JSON.parse(fs.readFileSync(path.join(dir, ".claude.json"), "utf8"));
+    const owner = acctKey(meta.oauthAccount);
+    return !owner || owner === uuid;
+  } catch {
+    return true;
+  }
+}
+
+// The env dir a pin uses, known without touching the keychain, so a window can
+// point Claude at it before anything else starts.
+function envDirFor(target) {
+  if (!target) return null;
+  return target.kind === "apiKey" ? envDir(KEY_ENV_PREFIX + target.key.id) : envDir(target.account.uuid);
+}
+
+function unavailableEnvDir() {
+  const dir = envDir(UNAVAILABLE_ENV);
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  writeEnvMeta(dir, (meta) => {
+    delete meta.oauthAccount;
+  });
+  return dir;
+}
+
 function writeEnvMeta(dir, mutate) {
   const metaPath = path.join(dir, ".claude.json");
   let meta = {};
@@ -954,8 +1065,14 @@ function writeEnvMeta(dir, mutate) {
 }
 
 module.exports = {
-  paths: { CLAUDE_JSON, CRED_FILE, INDEX_FILE, ENVS_DIR, SETTINGS_FILE, KEYS_FILE },
+  paths: { CLAUDE_JSON, CRED_FILE, INDEX_FILE, ENVS_DIR, SETTINGS_FILE, KEYS_FILE, STATUSLINE_FILE },
   pinnedEnvId: PINNED_ENV_ID,
+  envDirFor,
+  unavailableEnvDir,
+  statusLineState,
+  installStatusLine,
+  refreshStatusLineScript,
+  verifyApiKey,
   acctKey,
   readOauthAccount,
   currentAccount,

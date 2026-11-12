@@ -3,15 +3,36 @@
 const test = require("node:test");
 const assert = require("node:assert");
 const fs = require("fs");
+const http = require("http");
 const os = require("os");
 const path = require("path");
-const { execSync, execFileSync } = require("child_process");
+const { execSync, execFile, execFileSync } = require("child_process");
 
 const ENGINE = require.resolve("../lib/credentials");
 const ROOT = path.join(__dirname, "..");
 const isWin = process.platform === "win32";
 
 const KEY = "sk-ant-api03-TESTKEY_abcdefghijklmnopqrstuvwxyz-0123456789-WXYZ";
+
+// Stand-in for the Anthropic API that key checks talk to (ANTHROPIC_BASE_URL):
+// accepts keys with TESTKEY, rejects BADKEY, fails on FLAKY.
+let apiUrl;
+const api = http.createServer((req, res) => {
+  const key = String(req.headers["x-api-key"] || "");
+  const ok = req.url.startsWith("/v1/models") && req.headers["anthropic-version"];
+  res.statusCode = !ok ? 404 : key.includes("BADKEY") ? 401 : key.includes("FLAKY") ? 500 : 200;
+  res.end("{}");
+});
+test.before(
+  () =>
+    new Promise((resolve) =>
+      api.listen(0, "127.0.0.1", () => {
+        apiUrl = `http://127.0.0.1:${api.address().port}`;
+        resolve();
+      })
+    )
+);
+test.after(() => api.close());
 
 // customDir: run as if CLAUDE_CONFIG_DIR pointed at the config dir.
 function setup({ customDir = false } = {}) {
@@ -28,6 +49,7 @@ function setup({ customDir = false } = {}) {
   for (const v of ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX"]) {
     delete process.env[v];
   }
+  process.env.ANTHROPIC_BASE_URL = apiUrl;
   return load({ home, config, claudeJson: path.join(customDir ? config : home, ".claude.json") });
 }
 
@@ -412,8 +434,14 @@ test("CLI adds a piped key without printing it, and switches to it", async () =>
   const t = setup();
   t.login(A, { rt: "a1", exp: 100 });
   const cli = path.join(ROOT, "claude-plugin", "bin", "claude-switch");
-  const out = execFileSync(process.execPath, [cli, "add-key", "Work", "API"], { input: KEY, env: t.env(), encoding: "utf8" });
-  assert.match(out, /Saved the API key Work API \(…WXYZ\)/);
+  // Asynchronous, so this process's stand-in API can answer the key check.
+  const out = await new Promise((resolve, reject) => {
+    const child = execFile(process.execPath, [cli, "add-key", "Work", "API"], { env: t.env(), encoding: "utf8" }, (err, stdout) =>
+      err ? reject(err) : resolve(stdout)
+    );
+    child.stdin.end(KEY);
+  });
+  assert.match(out, /Saved the API key Work API \(…WXYZ\)\. Anthropic accepted it\./);
   assert.equal(out.includes(KEY), false);
 
   const used = execFileSync(process.execPath, [cli, "use", "work api"], { env: t.env(), encoding: "utf8" });
@@ -437,4 +465,92 @@ test("status line shows the key in use, else the account", async () => {
   const entry = await t.engine.addApiKey("Work API", KEY);
   await t.engine.useApiKey(entry.id);
   assert.equal(run(), "🔑 Work API");
+});
+
+// ---- 0.6.1: key check, pinned-dir safety, status line ---------------------
+
+test("checks a new key with the API: rejected keys are not saved", async () => {
+  const t = setup();
+  const ok = await t.engine.addApiKey("Good", KEY);
+  assert.equal(ok.check, "ok");
+  await assert.rejects(t.engine.addApiKey("Bad", KEY.replace("TESTKEY", "BADKEY")), /rejected this key/);
+  assert.deepEqual(
+    t.engine.listApiKeys().map((k) => k.name),
+    ["Good"]
+  );
+  // An API error or no network never blocks saving; it is reported instead.
+  const flaky = await t.engine.addApiKey("Flaky", KEY.replace("TESTKEY", "FLAKY"));
+  assert.equal(flaky.check, "unverified");
+  assert.match(flaky.checkNote, /500/);
+  process.env.ANTHROPIC_BASE_URL = "http://127.0.0.1:9"; // nothing listens there
+  const offline = await t.engine.addApiKey("Offline", KEY);
+  assert.equal(offline.check, "unverified");
+  // Stored entries carry no check details.
+  assert.equal("check" in t.engine.findApiKey("Offline"), false);
+});
+
+test("a sign-in to another account inside a pinned dir never overwrites the pinned account", async () => {
+  const t = setup();
+  t.login(A, { rt: "a1", exp: 100 });
+  await t.engine.captureCurrent();
+  const dir = await t.engine.materializeEnvDir("uuid-a");
+  // `claude auth login` with B run in the pinned window's terminal.
+  fs.writeFileSync(path.join(dir, ".credentials.json"), creds({ rt: "b9", exp: 900 }));
+  const meta = JSON.parse(fs.readFileSync(path.join(dir, ".claude.json"), "utf8"));
+  meta.oauthAccount = B;
+  fs.writeFileSync(path.join(dir, ".claude.json"), JSON.stringify(meta));
+
+  await t.engine.captureCurrent();
+  assert.equal((await t.engine.getSecret("uuid-a")).credentials, creds({ rt: "a1", exp: 100 }));
+  assert.equal(fs.readFileSync(t.credFile, "utf8"), creds({ rt: "a1", exp: 100 }));
+
+  // Setting the workspace up again puts the pinned account back.
+  await t.engine.materializeEnvDir("uuid-a");
+  assert.equal(fs.readFileSync(path.join(dir, ".credentials.json"), "utf8"), creds({ rt: "a1", exp: 100 }));
+  assert.equal(JSON.parse(fs.readFileSync(path.join(dir, ".claude.json"), "utf8")).oauthAccount.accountUuid, "uuid-a");
+});
+
+test("a pin's env dir is known up front, and a broken pin gets a signed-out dir", async () => {
+  const t = setup();
+  t.login(A, { rt: "a1", exp: 100 });
+  await t.engine.captureCurrent();
+  const key = await t.engine.addApiKey("Work API", KEY);
+  assert.equal(t.engine.envDirFor(t.engine.resolveAny("a@work.com")), await t.engine.materializeEnvDir("uuid-a"));
+  assert.equal(t.engine.envDirFor(t.engine.resolveAny("work api")), await t.engine.materializeKeyEnvDir(key.id));
+
+  const blocked = t.engine.unavailableEnvDir();
+  assert.equal(fs.existsSync(path.join(blocked, ".credentials.json")), false);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(blocked, ".claude.json"), "utf8")).oauthAccount, undefined);
+  // Even if someone signs in there, nothing is saved from it.
+  fs.writeFileSync(path.join(blocked, ".credentials.json"), creds({ rt: "x1", exp: 999 }));
+  await t.engine.captureCurrent();
+  assert.deepEqual(
+    t.engine.listAccounts().map((p) => p.uuid),
+    ["uuid-a"]
+  );
+});
+
+test("status line setup copies the script to the store and keeps a user's own line", async () => {
+  const t = setup();
+  const source = path.join(ROOT, "claude-plugin", "statusline", "claude-account.js");
+  assert.equal(t.engine.statusLineState(), "none");
+  assert.deepEqual(await t.engine.installStatusLine(source, "/opt/node/bin/node"), { ok: true });
+  const s = t.readSettings();
+  assert.equal(s.statusLine.type, "command");
+  assert.match(s.statusLine.command, /\/opt\/node\/bin\/node/);
+  assert.equal(s.statusLine.command.includes(t.engine.paths.STATUSLINE_FILE), true);
+  assert.equal(fs.readFileSync(t.engine.paths.STATUSLINE_FILE, "utf8"), fs.readFileSync(source, "utf8"));
+  assert.equal(t.engine.statusLineState(), "ours");
+
+  fs.writeFileSync(t.settings, JSON.stringify({ statusLine: { type: "command", command: "~/my-line.sh" } }));
+  assert.equal(t.engine.statusLineState(), "other");
+  assert.deepEqual(await t.engine.installStatusLine(source, "node"), { ok: false, existing: true });
+  assert.equal(t.readSettings().statusLine.command, "~/my-line.sh");
+  await t.engine.installStatusLine(source, "node", { replace: true });
+  assert.equal(t.engine.statusLineState(), "ours");
+
+  // After an update the copied script follows the bundled one.
+  fs.writeFileSync(t.engine.paths.STATUSLINE_FILE, "old");
+  t.engine.refreshStatusLineScript(source);
+  assert.equal(fs.readFileSync(t.engine.paths.STATUSLINE_FILE, "utf8"), fs.readFileSync(source, "utf8"));
 });
